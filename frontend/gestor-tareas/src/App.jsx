@@ -1,112 +1,96 @@
-import { useState } from 'react'
+// App.jsx
+// Componente raíz de la aplicación.
+// Responsabilidades:
+//   - Orquestar el estado global (filtro activo, modo creación)
+//   - Conectar el hook useTasks con los componentes de presentación
+//   - Manejar errores globales de las operaciones mutables
 
-function App() {
-  const [count, setCount] = useState(0)
+import { useState } from "react";
+import { useTasks } from "./hooks/useTasks";
+import TaskFilter from "./components/TaskFilter";
+import TaskList from "./components/TaskList";
+import TaskForm from "./components/TaskForm";
+
+export default function App() {
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [showForm, setShowForm]         = useState(false);
+  const [opError, setOpError]           = useState(null);
+
+  const { tasks, loading, error, addTask, editTask, removeTask } = useTasks(statusFilter);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleCreate = async (data) => {
+    setOpError(null);
+    try {
+      await addTask(data);
+      setShowForm(false);
+    } catch (err) {
+      setOpError(err.message);
+    }
+  };
+
+  const handleEdit = async (id, data) => {
+    setOpError(null);
+    try {
+      await editTask(id, data);
+    } catch (err) {
+      setOpError(err.message);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("¿Confirmás que querés eliminar esta tarea?")) return;
+    setOpError(null);
+    try {
+      await removeTask(id);
+    } catch (err) {
+      setOpError(err.message);
+    }
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
+    <div style={styles.container}>
+      <header style={styles.header}>
+        <h1 style={styles.h1}>Gestor de Tareas</h1>
+        <button onClick={() => setShowForm((v) => !v)} style={styles.btnNew}>
+          {showForm ? "Cancelar" : "+ Nueva tarea"}
         </button>
-      </section>
+      </header>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                Learn more
-              </a>
-            </li>
-          </ul>
+      {/* Formulario de creación (toggle) */}
+      {showForm && (
+        <div style={styles.formWrapper}>
+          <TaskForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      {/* Errores de operaciones mutables (crear, editar, eliminar) */}
+      {opError && <p style={styles.error}>⚠ {opError}</p>}
+
+      {/* Filtros */}
+      <TaskFilter current={statusFilter} onChange={setStatusFilter} />
+
+      {/* Estados de carga y error de fetch */}
+      {loading && <p style={styles.loading}>Cargando tareas...</p>}
+      {error   && <p style={styles.error}>Error al cargar tareas: {error}</p>}
+
+      {/* Lista */}
+      {!loading && !error && (
+        <TaskList tasks={tasks} onEdit={handleEdit} onDelete={handleDelete} />
+      )}
+    </div>
+  );
 }
 
-export default App
+const styles = {
+  container:   { maxWidth: "720px", margin: "0 auto", padding: "32px 16px", fontFamily: "system-ui, sans-serif" },
+  header:      { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" },
+  h1:          { margin: 0, fontSize: "22px" },
+  btnNew:      { padding: "8px 18px", background: "#2563eb", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px" },
+  formWrapper: { marginBottom: "24px", padding: "20px", border: "1px solid #e5e7eb", borderRadius: "8px", background: "#f9fafb" },
+  loading:     { color: "#888", fontSize: "14px" },
+  error:       { color: "#dc2626", fontSize: "14px" },
+};
