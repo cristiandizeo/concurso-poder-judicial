@@ -1,19 +1,22 @@
 // components/TaskForm.jsx
-// Formulario reutilizable para crear y editar tareas.
-// Si recibe `initialData`, opera en modo edición; si no, en modo creación.
-// El componente es controlado: todo el estado del form vive aquí.
+// Formulario para crear y editar tareas.
+// En modo creación carga los usuarios desde la API para mostrar un selector.
+// En modo edición no se permite cambiar el usuario asignado.
 
 import { useState } from "react";
+import { TASK_STATUSES } from "../constants/taskStatus";
+import { useUsers } from "../hooks/useUsers";
 
 const EMPTY_FORM = { title: "", description: "", status: "pending", userId: "" };
-const STATUSES   = ["pending", "in_progress", "completed"];
 
 export default function TaskForm({ initialData = null, onSubmit, onCancel }) {
-  const [form, setForm]       = useState(initialData ?? EMPTY_FORM);
+  const [form, setForm]         = useState(initialData ?? EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError]     = useState(null);
+  const [error, setError]       = useState(null);
 
-  const isEditing = Boolean(initialData);
+  // Solo cargamos usuarios en modo creación
+  const isEditing               = Boolean(initialData);
+  const { users, loading: loadingUsers } = useUsers();
 
   const handleChange = (e) =>
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -23,12 +26,8 @@ export default function TaskForm({ initialData = null, onSubmit, onCancel }) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit({
-        ...form,
-        userId: Number(form.userId),
-      });
+      await onSubmit({ ...form, userId: Number(form.userId) });
     } catch (err) {
-      // El error viene del hook (que lo recibe de tasksApi)
       setError(err.message);
     } finally {
       setSubmitting(false);
@@ -68,25 +67,33 @@ export default function TaskForm({ initialData = null, onSubmit, onCancel }) {
       <label style={styles.label}>
         Estado *
         <select name="status" value={form.status} onChange={handleChange} style={styles.input}>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
+          {TASK_STATUSES.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
           ))}
         </select>
       </label>
 
-      {/* En edición no se permite cambiar el usuario */}
+      {/* Selector de usuario — solo en modo creación */}
       {!isEditing && (
         <label style={styles.label}>
-          ID de usuario *
-          <input
+          Usuario *
+          <select
             name="userId"
-            type="number"
-            min={1}
             value={form.userId}
             onChange={handleChange}
             required
+            disabled={loadingUsers}
             style={styles.input}
-          />
+          >
+            <option value="">
+              {loadingUsers ? "Cargando usuarios..." : "— Seleccioná un usuario —"}
+            </option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.email})
+              </option>
+            ))}
+          </select>
         </label>
       )}
 
@@ -105,12 +112,12 @@ export default function TaskForm({ initialData = null, onSubmit, onCancel }) {
 }
 
 const styles = {
-  form:        { display: "flex", flexDirection: "column", gap: "12px", maxWidth: "480px" },
-  title:       { margin: "0 0 4px", fontSize: "16px" },
-  label:       { display: "flex", flexDirection: "column", gap: "4px", fontSize: "14px" },
-  input:       { padding: "8px", border: "1px solid #ccc", borderRadius: "6px", fontSize: "14px" },
-  error:       { color: "#dc2626", fontSize: "13px", margin: 0 },
-  actions:     { display: "flex", gap: "8px", marginTop: "4px" },
-  btnPrimary:  { padding: "8px 20px", background: "#2563eb", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px" },
-  btnSecondary:{ padding: "8px 20px", background: "white", border: "1px solid #ccc", borderRadius: "6px", cursor: "pointer", fontSize: "14px" },
+  form:         { display: "flex", flexDirection: "column", gap: "12px", maxWidth: "480px" },
+  title:        { margin: "0 0 4px", fontSize: "16px" },
+  label:        { display: "flex", flexDirection: "column", gap: "4px", fontSize: "14px" },
+  input:        { padding: "8px", border: "1px solid #ccc", borderRadius: "6px", fontSize: "14px" },
+  error:        { color: "#dc2626", fontSize: "13px", margin: 0 },
+  actions:      { display: "flex", gap: "8px", marginTop: "4px" },
+  btnPrimary:   { padding: "8px 20px", background: "#2563eb", color: "white", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "14px" },
+  btnSecondary: { padding: "8px 20px", background: "white", border: "1px solid #ccc", borderRadius: "6px", cursor: "pointer", fontSize: "14px" },
 };
