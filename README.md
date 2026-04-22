@@ -42,7 +42,8 @@ API REST en ASP.NET Core y una interfaz en React consumiendo dicha API.
 │       └── src/
 │           ├── api/               → Capa de acceso a la API REST
 │           ├── components/        → Componentes React
-│           ├── hooks/             → Hook personalizado useTasks
+│           ├── constants/         → Constantes
+│           ├── hooks/             → Hooks personalizados useTasks y useUsers
 │           └── App.jsx            → Componente raíz
 ├── database/
 │   ├── schema.sql                 → Creación de tablas
@@ -143,7 +144,7 @@ npx vitest run
 | PUT    | `/api/tasks/{id}`             | Actualizar una tarea existente  |
 | DELETE | `/api/tasks/{id}`             | Eliminar una tarea              |
 
-Estados válidos: `pending` · `in_progress` · `completed`
+Estados válidos: `pending (Pendiente)` · `in_progress (En progreso)` · `completed (Completada)`
 
 La documentación interactiva completa está disponible en `/swagger`.
 
