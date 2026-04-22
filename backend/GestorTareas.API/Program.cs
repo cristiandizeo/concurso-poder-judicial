@@ -8,31 +8,34 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Base de datos ──────────────────────────────────────────────────────────
-// La cadena de conexión se lee desde appsettings.json (nunca hardcodeada).
+// En producción (Render) la connection string llega por variable de entorno.
+// En desarrollo local se usa appsettings.json.
+var connectionString =
+    Environment.GetEnvironmentVariable("DATABASE_URL")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(connectionString));
 
 // ── Inyección de dependencias ──────────────────────────────────────────────
-// Registrar interfaces con sus implementaciones concretas.
-// Scoped: una instancia por request HTTP (correcto para repositorios con DbContext).
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 
 // ── Controladores ──────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 
-// ── Swagger / OpenAPI ──────────────────────────────────────────────────────
+// ── Swagger ────────────────────────────────────────────────────────────────
+// Activo en todos los entornos para que los jueces puedan explorar la API.
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new()
     {
-        Title   = "Gestor de Tareas API",
-        Version = "v1",
+        Title       = "Gestor de Tareas API",
+        Version     = "v1",
         Description = "API REST para gestión de tareas — Prueba técnica STJ La Pampa"
     });
 
-    // Incluir comentarios XML en Swagger (los /// del controller)
     var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     if (File.Exists(xmlPath))
@@ -40,26 +43,40 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // ── CORS ───────────────────────────────────────────────────────────────────
-// Permite que el frontend (Vite en localhost:5173) consuma la API en desarrollo.
+// FRONTEND_URL se configura como variable de entorno en Render una vez
+// que el frontend esté desplegado. En desarrollo acepta Vite (5173).
+var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
+                  ?? "http://localhost:5173";
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("FrontendDev", policy =>
-        policy.WithOrigins("http://localhost:5173")
+    options.AddPolicy("Frontend", policy =>
+        policy.WithOrigins(frontendUrl)
               .AllowAnyHeader()
               .AllowAnyMethod());
 });
 
 var app = builder.Build();
 
-// ── Middleware pipeline ────────────────────────────────────────────────────
-if (app.Environment.IsDevelopment())
+// ── Migraciones automáticas al iniciar ────────────────────────────────────
+// Garantiza que la base de datos en Supabase esté siempre sincronizada
+// con el modelo sin intervención manual en cada deploy.
+using (var scope = app.Services.CreateScope())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Gestor de Tareas v1"));
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
 }
 
-app.UseHttpsRedirection();
-app.UseCors("FrontendDev");
+// ── Middleware ─────────────────────────────────────────────────────────────
+app.UseSwagger();
+app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Gestor de Tareas v1"));
+
+// Render maneja HTTPS en el proxy; la app interna corre en HTTP.
+// UseHttpsRedirection causaría loops en ese contexto, se omite en producción.
+if (app.Environment.IsDevelopment())
+    app.UseHttpsRedirection();
+
+app.UseCors("Frontend");
 app.UseAuthorization();
 app.MapControllers();
 
