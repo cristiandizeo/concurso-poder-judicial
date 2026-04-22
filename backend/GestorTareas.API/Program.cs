@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using GestorTareas.API.Data;
 using GestorTareas.API.Repositories;
 using GestorTareas.API.Repositories.Interfaces;
@@ -8,11 +10,15 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Base de datos ──────────────────────────────────────────────────────────
-// En producción (Render) la connection string llega por variable de entorno.
-// En desarrollo local se usa appsettings.json.
+// Supabase resuelve a IPv6 por defecto; Render no tiene conectividad IPv6.
+// Solución: resolver el hostname a su IP IPv4 antes de construir la cadena
+// de conexión, para que Npgsql nunca intente conectarse por IPv6.
 var connectionString =
-    Environment.GetEnvironmentVariable("DATABASE_URL")
-    ?? builder.Configuration.GetConnectionString("DefaultConnection");
+    Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+    ?? builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("No se encontró cadena de conexión.");
+
+connectionString = ResolveToIPv4(connectionString);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -25,7 +31,6 @@ builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddControllers();
 
 // ── Swagger ────────────────────────────────────────────────────────────────
-// Activo en todos los entornos para que los jueces puedan explorar la API.
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -43,8 +48,6 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // ── CORS ───────────────────────────────────────────────────────────────────
-// FRONTEND_URL se configura como variable de entorno en Render una vez
-// que el frontend esté desplegado. En desarrollo acepta Vite (5173).
 var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
                   ?? "http://localhost:5173";
 
@@ -58,9 +61,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// ── Migraciones automáticas al iniciar ────────────────────────────────────
-// Garantiza que la base de datos en Supabase esté siempre sincronizada
-// con el modelo sin intervención manual en cada deploy.
+// ── Migraciones automáticas ────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -71,8 +72,6 @@ using (var scope = app.Services.CreateScope())
 app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Gestor de Tareas v1"));
 
-// Render maneja HTTPS en el proxy; la app interna corre en HTTP.
-// UseHttpsRedirection causaría loops en ese contexto, se omite en producción.
 if (app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 
@@ -81,3 +80,44 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Resuelve el hostname en la connection string a su dirección IPv4.
+/// Necesario porque Render no tiene conectividad IPv6 pero Supabase
+/// devuelve registros AAAA (IPv6) primero en el DNS.
+/// Si la resolución falla o ya es una IP, devuelve la cadena sin cambios.
+/// </summary>
+static string ResolveToIPv4(string connectionString)
+{
+    try
+    {
+        // Extraer el valor del parámetro Host=...
+        var hostKey = "Host=";
+        var hostStart = connectionString.IndexOf(hostKey, StringComparison.OrdinalIgnoreCase);
+        if (hostStart < 0) return connectionString;
+
+        hostStart += hostKey.Length;
+        var hostEnd = connectionString.IndexOf(';', hostStart);
+        var hostname = hostEnd < 0
+            ? connectionString[hostStart..]
+            : connectionString[hostStart..hostEnd];
+
+        // Si ya es una IP no hace falta resolver
+        if (IPAddress.TryParse(hostname, out _)) return connectionString;
+
+        // Resolver y tomar la primera dirección IPv4
+        var addresses = Dns.GetHostAddresses(hostname);
+        var ipv4 = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetwork);
+        if (ipv4 is null) return connectionString;
+
+        // Reemplazar el hostname por la IP en la cadena de conexión
+        return connectionString.Replace($"{hostKey}{hostname}", $"{hostKey}{ipv4}");
+    }
+    catch
+    {
+        // En caso de error de DNS, intentar con la cadena original
+        return connectionString;
+    }
+}
