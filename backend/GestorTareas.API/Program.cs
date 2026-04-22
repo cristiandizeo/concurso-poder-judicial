@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ── Base de datos ──────────────────────────────────────────────────────────
 // La cadena de conexión se lee desde appsettings.json (nunca hardcodeada).
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // ── Inyección de dependencias ──────────────────────────────────────────────
 // Registrar interfaces con sus implementaciones concretas.
