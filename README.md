@@ -7,6 +7,23 @@ Permite crear, listar, editar, eliminar y filtrar tareas por estado, con una
 API REST en ASP.NET Core y una interfaz en React consumiendo dicha API.
 
 ---
+## Capturas de pantalla
+
+Listado de tareas
+<img width="1365" height="628" alt="Captura de pantalla 2026-04-21 222014" src="https://github.com/user-attachments/assets/85f9ff70-503a-496d-a8d5-4cbeaab6327e" />
+
+Filtrado de tareas
+<img width="1365" height="628" alt="Captura de pantalla 2026-04-21 222038" src="https://github.com/user-attachments/assets/7f5b59d0-77ba-4ff6-9215-3c0b9892b61e" />
+
+Editar tarea
+<img width="1353" height="629" alt="Captura de pantalla 2026-04-21 222102" src="https://github.com/user-attachments/assets/ea9700c5-1ff7-4f5c-8851-fd8a259edc30" />
+
+Crear tarea
+<img width="1351" height="631" alt="Captura de pantalla 2026-04-21 222132" src="https://github.com/user-attachments/assets/d0028bc7-6601-4624-9bdc-05d149e1b2d7" />
+
+
+
+---
 
 ## Stack tecnológico
 
