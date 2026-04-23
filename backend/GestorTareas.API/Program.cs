@@ -21,7 +21,11 @@ var connectionString =
 connectionString = ResolveToIPv4(connectionString);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(connectionString));
+{
+    var connString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+        ?? builder.Configuration.GetConnectionString("DefaultConnection");
+    options.UseNpgsql(ResolveToIPv4(connString));
+});
 
 // ── Inyección de dependencias ──────────────────────────────────────────────
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
