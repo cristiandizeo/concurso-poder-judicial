@@ -6,80 +6,71 @@ using GestorTareas.API.Repositories.Interfaces;
 using GestorTareas.API.Services;
 using GestorTareas.API.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Base de datos ──────────────────────────────────────────────────────────
-// Supabase resuelve a IPv6 por defecto; Render no tiene conectividad IPv6.
-// Solución: resolver el hostname a su IP IPv4 antes de construir la cadena
-// de conexión, para que Npgsql nunca intente conectarse por IPv6.
-var connectionString =
-    Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+// ── 1. Configuración de Base de Datos ──────────────────────────────────────
+var rawConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
     ?? builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("No se encontró cadena de conexión.");
 
-connectionString = ResolveToIPv4(connectionString);
+// Forzamos la resolución a IPv4 usando el Helper mejorado
+var connectionString = ResolveToIPv4(rawConnectionString);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-{
-    var connString = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-        ?? builder.Configuration.GetConnectionString("DefaultConnection");
-    options.UseNpgsql(ResolveToIPv4(connString));
-});
+    options.UseNpgsql(connectionString));
 
-// ── Inyección de dependencias ──────────────────────────────────────────────
+// ── 2. Inyección de dependencias ──────────────────────────────────────────
 builder.Services.AddScoped<ITaskRepository, TaskRepository>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 
-// ── Controladores ──────────────────────────────────────────────────────────
 builder.Services.AddControllers();
-
-// ── Swagger ────────────────────────────────────────────────────────────────
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
-{
-    options.SwaggerDoc("v1", new()
-    {
-        Title       = "Gestor de Tareas API",
-        Version     = "v1",
-        Description = "API REST para gestión de tareas — Prueba técnica STJ La Pampa"
-    });
+builder.Services.AddSwaggerGen();
 
-    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-    if (File.Exists(xmlPath))
-        options.IncludeXmlComments(xmlPath);
-});
-
-// ── CORS ───────────────────────────────────────────────────────────────────
-var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
-                  ?? "http://localhost:5173";
+// ── 3. CORS (Configuración Robusta) ───────────────────────────────────────
+var frontendUrl = (Environment.GetEnvironmentVariable("FRONTEND_URL") 
+                  ?? "http://localhost:5173").TrimEnd('/'); // <--- IMPORTANTE
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
         policy.WithOrigins(frontendUrl)
               .AllowAnyHeader()
-              .AllowAnyMethod());
+              .AllowAnyMethod()
+              .SetIsOriginAllowedToAllowWildcardSubdomains());
 });
 
 var app = builder.Build();
 
-// ── Migraciones automáticas ────────────────────────────────────────────────
+// ── 4. Migraciones con protección ante fallos ─────────────────────────────
+// Si esto falla, la app sigue viva y el CORS puede informar el error al Front.
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    try 
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Database.Migrate();
+        Console.WriteLine("✅ Base de datos conectada y migrada.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error crítico de DB: {ex.Message}");
+        // Dejamos que la app continúe para que no de error 139 (SegFault) inmediato
+    }
 }
 
-// ── Middleware ─────────────────────────────────────────────────────────────
+// ── 5. Orden de Middleware (ESTRICTO) ─────────────────────────────────────
 app.UseSwagger();
-app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Gestor de Tareas v1"));
+app.UseSwaggerUI();
+
+// CORS DEBE IR ANTES QUE CUALQUIER COSA QUE RESPONDA AL CLIENTE
+app.UseCors("Frontend");
 
 if (app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 
-app.UseCors("Frontend");
 app.UseAuthorization();
 app.MapControllers();
 
@@ -87,41 +78,29 @@ app.Run();
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-/// <summary>
-/// Resuelve el hostname en la connection string a su dirección IPv4.
-/// Necesario porque Render no tiene conectividad IPv6 pero Supabase
-/// devuelve registros AAAA (IPv6) primero en el DNS.
-/// Si la resolución falla o ya es una IP, devuelve la cadena sin cambios.
-/// </summary>
 static string ResolveToIPv4(string connectionString)
 {
     try
     {
-        // Extraer el valor del parámetro Host=...
-        var hostKey = "Host=";
-        var hostStart = connectionString.IndexOf(hostKey, StringComparison.OrdinalIgnoreCase);
-        if (hostStart < 0) return connectionString;
+        var cb = new NpgsqlConnectionStringBuilder(connectionString);
+        string hostname = cb.Host;
 
-        hostStart += hostKey.Length;
-        var hostEnd = connectionString.IndexOf(';', hostStart);
-        var hostname = hostEnd < 0
-            ? connectionString[hostStart..]
-            : connectionString[hostStart..hostEnd];
+        if (string.IsNullOrEmpty(hostname) || IPAddress.TryParse(hostname, out _)) 
+            return connectionString;
 
-        // Si ya es una IP no hace falta resolver
-        if (IPAddress.TryParse(hostname, out _)) return connectionString;
-
-        // Resolver y tomar la primera dirección IPv4
         var addresses = Dns.GetHostAddresses(hostname);
         var ipv4 = Array.Find(addresses, a => a.AddressFamily == AddressFamily.InterNetwork);
-        if (ipv4 is null) return connectionString;
 
-        // Reemplazar el hostname por la IP en la cadena de conexión
-        return connectionString.Replace($"{hostKey}{hostname}", $"{hostKey}{ipv4}");
+        if (ipv4 != null)
+        {
+            cb.Host = ipv4.ToString();
+            Console.WriteLine($"🌐 IPv4 Proxy: {hostname} -> {cb.Host}");
+            return cb.ToString();
+        }
     }
-    catch
+    catch (Exception ex)
     {
-        // En caso de error de DNS, intentar con la cadena original
-        return connectionString;
+        Console.WriteLine($"⚠️ Error resolviendo DNS: {ex.Message}");
     }
+    return connectionString;
 }
